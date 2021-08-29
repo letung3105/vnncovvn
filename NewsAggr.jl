@@ -115,7 +115,7 @@ DATAFRAMES = Dict(
 let df = transform(DATAFRAMES[:vnexpress][:covid19_2021_by_day],
 		# Calculate mortality
 		[:deaths_cummulative, :cases_cummulative]
-			=> ((deaths, cases) -> deaths./cases.*100)
+			=> ((deaths, cases) -> deaths.//cases.*100)
 			=> :mortality,
 	)
 	
@@ -164,23 +164,23 @@ end
 let df = transform(DATAFRAMES[:vnexpress][:covid19_2021_by_day],
 		# Normalized cummulative active cases over cummulative cases
 		[:cases_cummulative, :deaths_cummulative, :recovered_cummulative]
-			=> ((x, y, z) -> 1 .- y./x .- z./x)
+			=> ((x, y, z) -> 1 .- y.//x .- z.//x)
 			=> :cases_cummulative_active_weight,
 		# Normalized cummulative deaths over cummulative cases
 		[:cases_cummulative, :deaths_cummulative]
-			=> ((x, y) -> y ./ x)
+			=> ((x, y) -> y .// x)
 			=> :deaths_cummulative_weight,
 		# Normalized cummulative recovered cases over cummulative cases
 		[:cases_cummulative, :recovered_cummulative]
-			=> ((x, y) -> y ./ x)
+			=> ((x, y) -> y .// x)
 			=> :recovered_cummulative_weight,
 		# Calculate percentage of cases that are on ICU
 		[:cases_cummulative_on_icu, :cases_cummulative]
-			=> ((x, y) -> x ./ y .* 100)
+			=> ((x, y) -> x .// y .* 100)
 			=> :cases_cummulative_on_icu_percent,
 		# Calculate percentage of cases that are on ECMO
 		[:cases_cummulative_on_ecmo, :cases_cummulative]
-			=> ((x, y) -> x ./ y .* 100)
+			=> ((x, y) -> x .// y .* 100)
 			=> :cases_cummulative_on_ecmo_percent,
 	);
 	
@@ -522,11 +522,11 @@ end
 # ╟─52c5aa3b-31c9-41d6-b840-b766d8724932
 # ╟─ec4728d1-2bc4-4da7-8290-565aaaf092b2
 # ╟─9f7c09d8-fc02-4894-9cb3-c17ea157c71b
-# ╟─bc1d8e14-0be1-4b87-a129-7b39251d60c5
-# ╟─bb6d4ca5-3eb6-4405-90f5-add2d5f1c4ea
+# ╠═bc1d8e14-0be1-4b87-a129-7b39251d60c5
+# ╠═bb6d4ca5-3eb6-4405-90f5-add2d5f1c4ea
 # ╟─fc216607-af60-431a-bac5-53240596b6a9
-# ╟─a606da0f-2f60-4b12-a56a-8ef9261c8cc6
-# ╟─908d8a8a-eaa5-4648-ae3d-d2bcba501379
+# ╠═a606da0f-2f60-4b12-a56a-8ef9261c8cc6
+# ╠═908d8a8a-eaa5-4648-ae3d-d2bcba501379
 # ╟─873db3d5-af35-4d03-b4ff-5a1f10ab4924
 # ╟─fd11d312-8082-4faf-9551-dc597687f4ef
 # ╟─b1cd1aa6-2dfe-4d02-983a-aa440d44550f
