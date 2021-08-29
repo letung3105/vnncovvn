@@ -361,38 +361,6 @@ else
 	end
 end
 
-# ╔═╡ c7df24e3-37ff-45ea-950d-99f3c1c711ce
-if isempty(locs_to_plot)
-	md"**Location(s) not selected**"
-elseif (isnothing(compare_locs_plot_date_begin)
-		|| isnothing(compare_locs_plot_date_end)
-		|| compare_locs_plot_date_begin > compare_locs_plot_date_end
-		|| compare_locs_plot_date_begin ∉ DATES
-		|| compare_locs_plot_date_end ∉ DATES)
-	md"**Bad dates input**"
-else
-	let # Select dates to plot
-		dates_to_plot =
-			compare_locs_plot_date_begin:Dates.Day(1):compare_locs_plot_date_end;
-		df = filter(x -> x.date in dates_to_plot,
-			DATAFRAMES[:vnexpress][:covid19_2021_by_total]);
-		yscale = compare_locs_plot_log_y ? :log10 : :identity
-		
-		# Avoid -Inf with log
-		if compare_locs_plot_log_y
-			df[!, locs_to_plot] .+= 1
-		end
-
-		@df df plot(
-			:date, cols(locs_to_plot);
-			plot_title = "Cummulative cases",
-			xlabel = "Date",
-			ylabel = "Cases count",
-			yscale = yscale,
-		)
-	end
-end
-
 # ╔═╡ eef505a5-0a58-4137-99e6-7effb2daf830
 if isempty(locs_to_plot)
 	md"**Location(s) not selected**"
@@ -418,6 +386,38 @@ else
 		@df df plot(
 			:date, cols(locs_to_plot);
 			plot_title = "Daily cases",
+			xlabel = "Date",
+			ylabel = "Cases count",
+			yscale = yscale,
+		)
+	end
+end
+
+# ╔═╡ c7df24e3-37ff-45ea-950d-99f3c1c711ce
+if isempty(locs_to_plot)
+	md"**Location(s) not selected**"
+elseif (isnothing(compare_locs_plot_date_begin)
+		|| isnothing(compare_locs_plot_date_end)
+		|| compare_locs_plot_date_begin > compare_locs_plot_date_end
+		|| compare_locs_plot_date_begin ∉ DATES
+		|| compare_locs_plot_date_end ∉ DATES)
+	md"**Bad dates input**"
+else
+	let # Select dates to plot
+		dates_to_plot =
+			compare_locs_plot_date_begin:Dates.Day(1):compare_locs_plot_date_end;
+		df = filter(x -> x.date in dates_to_plot,
+			DATAFRAMES[:vnexpress][:covid19_2021_by_total]);
+		yscale = compare_locs_plot_log_y ? :log10 : :identity
+		
+		# Avoid -Inf with log
+		if compare_locs_plot_log_y
+			df[!, locs_to_plot] .+= 1
+		end
+
+		@df df plot(
+			:date, cols(locs_to_plot);
+			plot_title = "Cummulative cases",
 			xlabel = "Date",
 			ylabel = "Cases count",
 			yscale = yscale,
@@ -608,7 +608,7 @@ else
 				:date, :recovered,
 				label = "daily recovered",				
 				color = plot_color_recovered,
-				rotation = 45,
+				xrotation = xrotation,
 				yscale = yscale);
 
 			subplot_deaths_cumsum = @df df plot(
