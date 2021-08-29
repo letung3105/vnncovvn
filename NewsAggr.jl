@@ -144,10 +144,144 @@ end
 # ╔═╡ bcc7b16f-9714-45e9-92bd-70dbea4b4cc6
 md"### Cleaned dataframes"
 
+# ╔═╡ ab548612-82a5-48fa-b81c-aae646666997
+md"### Packages"
+
+# ╔═╡ 85665111-9c21-457d-b4c2-d12521761522
+md"### Helper functions"
+
+# ╔═╡ 4b600132-f50e-4aaf-9646-a2bc4d643634
+hasmissing(df::DataFrame) =
+	any(Iterators.flatten(map(row -> ismissing.(values(row)), eachrow(df))))
+
+# ╔═╡ 7b9759f1-f696-4d50-822d-88df713fb575
+begin
+	@userplot MyAreaPlot
+
+	@recipe function f(a::MyAreaPlot)
+		data = cumsum(a.args[end], dims = 2)
+		x = length(a.args) == 1 ? (axes(data, 1)) : a.args[1]
+		seriestype := :line
+		for i in axes(data, 2)
+			@series begin
+				fillrange := i > 1 ? data[:, i - 1] : 1
+				x, data[:, i]
+			end
+		end
+	end
+end
+
+# ╔═╡ dede2946-ee8b-4a78-b9a6-e7e51eeeb41f
+function clean_covid19_2021_by_day(df_raw::DataFrame)::DataFrame
+	df = copy(df_raw)
+	# Rename columns and parse date column
+	select!(
+		df,
+		"day_full" => (x -> Date.(x, dateformat"Y/m/d")) => :date,
+		# All daily cases
+		"new_cases" => :cases,
+		# Daily active cases
+		"new_active" => :cases_active,
+		# Daily cases within the community
+		"CỘNG ĐỒNG" => :cases_community,
+		"blockade" => :cases_quarantined,
+		"community" => :cases_investigating,
+		# Daily cases from immigrants
+		"imported" => :cases_imported,
+		# All cummulative cases (since 27/04)
+		"total_cases" => :cases_cummulative,
+		# Cummulative active cases
+		"total_active" => :cases_cummulative_active,
+		# Cummulative cases within the community
+		"TỔNG CỘNG ĐỒNG" => :cases_cummulative_community,
+		# Cummulative cases with severe conditions 
+		"ECMO" => :cases_cummulative_on_ecmo,
+		"ICU_52" => :cases_cummulative_on_icu,
+		# Daily deaths
+		"new_deaths" => :deaths,
+		# Cummulative deaths
+		"total_deaths" => :deaths_cummulative,
+		# Daily recovered
+		"new_recovered" => :recovered,
+		# Cummulative recovered
+		"total_recovered_12" => :recovered_cummulative,
+	)
+	
+	# Collect data within valid dates
+	filter!(cols -> cols.date in DATES, df)
+	
+	# Replace missing cases under investigation with total number of cases
+	# in the community. This is done because in earlier dates, there's no
+	# report on this particular number.
+	df[!, "cases_investigating"] = 
+		coalesce.(df[!, :cases_investigating], df[!, :cases_community])
+	
+	# Replace missing cases in quarantine with 0, because we already assume
+	# all community cases are not quarantined in dates with missing data
+	df[!, "cases_quarantined"] = 
+	 	coalesce.(df[!, :cases_quarantined], 0)
+	
+	# Use Last Observered Carried Forward replacement strategy for cases
+	# on ECMO and ICU, while setting the initial number to 0.
+	cols_cumulative_locf = [:cases_cummulative_on_ecmo, :cases_cummulative_on_icu]
+	df[1, cols_cumulative_locf[1]] = 0
+	df[1, cols_cumulative_locf[2]] = 0
+	df[!, cols_cumulative_locf] = Impute.locf(df[!, cols_cumulative_locf])
+	
+	@assert !hasmissing(df)
+	df
+end
+
+# ╔═╡ 0b642ad0-8648-41bd-8d75-062a50a0e0e3
+function clean_covid19_2021_by_total(df_raw::DataFrame)::DataFrame
+	df = copy(df_raw)
+	
+	# Remove the first row that has missing date
+	delete!(df, 1)
+	
+	# Convert string to date and only select needed columns
+	select!(df,
+		"Ngày" => (x -> Date.(x .* "/2021", dateformat"d/m/Y")) => :date,
+		LOCATIONS
+	)
+	
+	# Should be no missing field
+	@assert !hasmissing(df)
+	df
+end
+
+# ╔═╡ ed4ebadd-adb7-4c97-a044-48fcc37064b8
+function clean_covid19_2021_by_location(df_raw::DataFrame)::DataFrame
+	df = copy(df_raw)
+	
+	# Remove the first row that has missing date
+	delete!(df, 1)
+	
+	# Convert string to date and only select needed columns
+	select!(df,
+		"Ngày" => (x -> Date.(x .* "/2021", dateformat"d/m/Y")) => :date,
+		LOCATIONS
+	)
+	
+	# Replace missing with 0
+	df = coalesce.(df, 0)
+	
+	# Should be no missing field
+	@assert !hasmissing(df)
+	df
+end
+
 # ╔═╡ f8b80935-e3fc-4224-82a9-adf88c3bcc97
 DATAFRAMES = Dict(
-	:vnexpress => Dict{Symbol, DataFrame}(),
-);
+	:vnexpress => Dict(
+		:covid19_2021_by_day => clean_covid19_2021_by_day(
+			DATAFRAMES_RAW[:vnexpress][:covid19_2021_by_day]),
+		:covid19_2021_by_location => clean_covid19_2021_by_location(
+			DATAFRAMES_RAW[:vnexpress][:covid19_2021_by_location]),
+		:covid19_2021_by_total => clean_covid19_2021_by_total(
+			DATAFRAMES_RAW[:vnexpress][:covid19_2021_by_total]),
+	)
+)
 
 # ╔═╡ 9f7c09d8-fc02-4894-9cb3-c17ea157c71b
 if (isnothing(overview_plot_date_begin) 
@@ -265,6 +399,87 @@ else
 				subplot_composition, subplot_lifesupport,
 				plot_title = "Compositions",
 				layout = layout)
+		end
+	end
+end
+
+# ╔═╡ bb6d4ca5-3eb6-4405-90f5-add2d5f1c4ea
+if (isnothing(status_plot_date_begin)
+		|| isnothing(status_plot_date_end)
+		|| status_plot_date_begin > status_plot_date_end
+		|| status_plot_date_begin ∉ DATES
+		|| status_plot_date_end ∉ DATES)
+	md"**Bad dates input**"
+else
+	let # Select dates to plot
+		dates_to_plot = status_plot_date_begin:Dates.Day(1):status_plot_date_end;
+		df = filter(x -> x.date in dates_to_plot,
+			DATAFRAMES[:vnexpress][:covid19_2021_by_day]);
+		# Shared plot attributes
+		yscale = status_plot_log_y ? :log10 : :identity;
+		plot_color_active = PALETTE_COLORS[2];
+		plot_color_recovered = PALETTE_COLORS[3];
+		plot_color_deaths = PALETTE_COLORS[4];
+		xrotation = 45
+
+		if status_plot_log_y
+			df[!, [:deaths,
+					:deaths_cummulative,
+					:recovered,
+					:recovered_cummulative,
+					:cases_cummulative_active]] .+= 1
+		end
+
+		let	subplot_active_cumsum = @df df plot(
+				:date, :cases_cummulative_active,
+				label = "active cases",
+				linetype = :bar,
+				color = plot_color_active,
+				xrotation = xrotation,
+				yscale = yscale,
+				);
+			subplot_active_diff = @df df plot(
+				:date, :cases_active,
+				label = "active cases' diff.",
+				color = plot_color_active,
+				xrotation = xrotation);
+
+			subplot_recovered_cumsum = @df df plot(
+				:date, :recovered_cummulative,
+				label = "total recovered",
+				linetype = :bar,
+				color = plot_color_recovered,
+				xrotation = xrotation,
+				yscale = yscale);
+			subplot_recovered_daily = @df df plot(
+				:date, :recovered,
+				label = "daily recovered",				
+				color = plot_color_recovered,
+				xrotation = xrotation,
+				yscale = yscale);
+
+			subplot_deaths_cumsum = @df df plot(
+				:date, :deaths_cummulative,
+				label = "total deaths",
+				xrotation = xrotation,
+				linetype = :bar,
+				color = plot_color_deaths,
+				yscale = yscale);
+			subplot_deaths_daily = @df df plot(
+				:date, :deaths,
+				label = "daily deaths",
+				color = plot_color_deaths,
+				xrotation = xrotation,
+				yscale = yscale);
+
+			plot(
+				subplot_active_diff, subplot_active_cumsum,
+				subplot_recovered_daily, subplot_recovered_cumsum,
+				subplot_deaths_daily, subplot_deaths_cumsum,
+				plot_title = "Cases' status",
+				size = (700, 900),
+				layout = @layout([a b; c d; e f])
+			)
 		end
 	end
 end
@@ -425,218 +640,6 @@ else
 	end
 end
 
-# ╔═╡ 5da0ef7d-ab07-403b-b9b3-7928202eebdb
-md"#### Daily summaries"
-
-# ╔═╡ f7549e5f-60f1-4530-bec4-88b020f65a46
-md"#### Cummulative cases since 27th April"
-
-# ╔═╡ 8e812230-5284-4a9a-b16a-c054a12407f5
-md"#### Daily cases since 27th April"
-
-# ╔═╡ ab548612-82a5-48fa-b81c-aae646666997
-md"### Packages"
-
-# ╔═╡ 85665111-9c21-457d-b4c2-d12521761522
-md"### Helper functions"
-
-# ╔═╡ 4b600132-f50e-4aaf-9646-a2bc4d643634
-hasmissing(df::DataFrame) =
-	any(Iterators.flatten(map(row -> ismissing.(values(row)), eachrow(df))))
-
-# ╔═╡ dede2946-ee8b-4a78-b9a6-e7e51eeeb41f
-let df = copy(DATAFRAMES_RAW[:vnexpress][:covid19_2021_by_day])
-	# Rename columns and parse date column
-	select!(
-		df,
-		"day_full" => (x -> Date.(x, dateformat"Y/m/d")) => :date,
-		# All daily cases
-		"new_cases" => :cases,
-		# Daily active cases
-		"new_active" => :cases_active,
-		# Daily cases within the community
-		"CỘNG ĐỒNG" => :cases_community,
-		"blockade" => :cases_quarantined,
-		"community" => :cases_investigating,
-		# Daily cases from immigrants
-		"imported" => :cases_imported,
-		# All cummulative cases (since 27/04)
-		"total_cases" => :cases_cummulative,
-		# Cummulative active cases
-		"total_active" => :cases_cummulative_active,
-		# Cummulative cases within the community
-		"TỔNG CỘNG ĐỒNG" => :cases_cummulative_community,
-		# Cummulative cases with severe conditions 
-		"ECMO" => :cases_cummulative_on_ecmo,
-		"ICU_52" => :cases_cummulative_on_icu,
-		# Daily deaths
-		"new_deaths" => :deaths,
-		# Cummulative deaths
-		"total_deaths" => :deaths_cummulative,
-		# Daily recovered
-		"new_recovered" => :recovered,
-		# Cummulative recovered
-		"total_recovered_12" => :recovered_cummulative,
-	)
-	
-	# Collect data within valid dates
-	filter!(cols -> cols.date in DATES, df)
-	
-	# Replace missing cases under investigation with total number of cases
-	# in the community. This is done because in earlier dates, there's no
-	# report on this particular number.
-	df[!, "cases_investigating"] = 
-		coalesce.(df[!, :cases_investigating], df[!, :cases_community])
-	
-	# Replace missing cases in quarantine with 0, because we already assume
-	# all community cases are not quarantined in dates with missing data
-	df[!, "cases_quarantined"] = 
-	 	coalesce.(df[!, :cases_quarantined], 0)
-	
-	# Use Last Observered Carried Forward replacement strategy for cases
-	# on ECMO and ICU, while setting the initial number to 0.
-	cols_cumulative_locf = [:cases_cummulative_on_ecmo, :cases_cummulative_on_icu]
-	df[1, cols_cumulative_locf[1]] = 0
-	df[1, cols_cumulative_locf[2]] = 0
-	df[!, cols_cumulative_locf] = Impute.locf(df[!, cols_cumulative_locf])
-	
-	@assert !hasmissing(df)
-	DATAFRAMES[:vnexpress][:covid19_2021_by_day] = df
-end
-
-# ╔═╡ 0b642ad0-8648-41bd-8d75-062a50a0e0e3
-let df = copy(DATAFRAMES_RAW[:vnexpress][:covid19_2021_by_total])
-	# Remove the first row that has missing date
-	delete!(df, 1)
-	
-	# Convert string to date and only select needed columns
-	select!(df,
-		"Ngày" => (x -> Date.(x .* "/2021", dateformat"d/m/Y")) => :date,
-		LOCATIONS
-	)
-	
-	# Should be no missing field
-	@assert !hasmissing(df)
-	DATAFRAMES[:vnexpress][:covid19_2021_by_total] = df
-end
-
-# ╔═╡ ed4ebadd-adb7-4c97-a044-48fcc37064b8
-let df = copy(DATAFRAMES_RAW[:vnexpress][:covid19_2021_by_location])
-	# Remove the first row that has missing date
-	delete!(df, 1)
-	
-	# Convert string to date and only select needed columns
-	select!(df,
-		"Ngày" => (x -> Date.(x .* "/2021", dateformat"d/m/Y")) => :date,
-		LOCATIONS
-	)
-	
-	# Replace missing with 0
-	df = coalesce.(df, 0)
-	
-	# Should be no missing field
-	@assert !hasmissing(df)
-	DATAFRAMES[:vnexpress][:covid19_2021_by_location] = df
-end
-
-# ╔═╡ 7b9759f1-f696-4d50-822d-88df713fb575
-begin
-	@userplot MyAreaPlot
-
-	@recipe function f(a::MyAreaPlot)
-		data = cumsum(a.args[end], dims = 2)
-		x = length(a.args) == 1 ? (axes(data, 1)) : a.args[1]
-		seriestype := :line
-		for i in axes(data, 2)
-			@series begin
-				fillrange := i > 1 ? data[:, i - 1] : 1
-				x, data[:, i]
-			end
-		end
-	end
-end
-
-# ╔═╡ bb6d4ca5-3eb6-4405-90f5-add2d5f1c4ea
-if (isnothing(status_plot_date_begin)
-		|| isnothing(status_plot_date_end)
-		|| status_plot_date_begin > status_plot_date_end
-		|| status_plot_date_begin ∉ DATES
-		|| status_plot_date_end ∉ DATES)
-	md"**Bad dates input**"
-else
-	let # Select dates to plot
-		dates_to_plot = status_plot_date_begin:Dates.Day(1):status_plot_date_end;
-		df = filter(x -> x.date in dates_to_plot,
-			DATAFRAMES[:vnexpress][:covid19_2021_by_day]);
-		# Shared plot attributes
-		yscale = status_plot_log_y ? :log10 : :identity;
-		plot_color_active = PALETTE_COLORS[2];
-		plot_color_recovered = PALETTE_COLORS[3];
-		plot_color_deaths = PALETTE_COLORS[4];
-		xrotation = 45
-
-		if status_plot_log_y
-			df[!, [:deaths,
-					:deaths_cummulative,
-					:recovered,
-					:recovered_cummulative,
-					:cases_cummulative_active]] .+= 1
-		end
-
-		let	subplot_active_cumsum = @df df plot(
-				:date, :cases_cummulative_active,
-				label = "active cases",
-				linetype = :bar,
-				color = plot_color_active,
-				xrotation = xrotation,
-				yscale = yscale,
-				);
-			subplot_active_diff = @df df plot(
-				:date, :cases_active,
-				label = "active cases' diff.",
-				color = plot_color_active,
-				xrotation = xrotation);
-
-			subplot_recovered_cumsum = @df df plot(
-				:date, :recovered_cummulative,
-				label = "total recovered",
-				linetype = :bar,
-				color = plot_color_recovered,
-				xrotation = xrotation,
-				yscale = yscale);
-			subplot_recovered_daily = @df df plot(
-				:date, :recovered,
-				label = "daily recovered",				
-				color = plot_color_recovered,
-				xrotation = xrotation,
-				yscale = yscale);
-
-			subplot_deaths_cumsum = @df df plot(
-				:date, :deaths_cummulative,
-				label = "total deaths",
-				xrotation = xrotation,
-				linetype = :bar,
-				color = plot_color_deaths,
-				yscale = yscale);
-			subplot_deaths_daily = @df df plot(
-				:date, :deaths,
-				label = "daily deaths",
-				color = plot_color_deaths,
-				xrotation = xrotation,
-				yscale = yscale);
-
-			plot(
-				subplot_active_diff, subplot_active_cumsum,
-				subplot_recovered_daily, subplot_recovered_cumsum,
-				subplot_deaths_daily, subplot_deaths_cumsum,
-				plot_title = "Cases' status",
-				size = (700, 900),
-				layout = @layout([a b; c d; e f])
-			)
-		end
-	end
-end
-
 # ╔═╡ Cell order:
 # ╟─52c5aa3b-31c9-41d6-b840-b766d8724932
 # ╟─1ecf716e-a584-4013-852b-2f461f63fe66
@@ -663,15 +666,12 @@ end
 # ╟─06f0d4dc-25a2-4b3f-8558-d0b4935f7e99
 # ╟─d9dabd88-5e88-4b94-816e-3545f598100b
 # ╟─bcc7b16f-9714-45e9-92bd-70dbea4b4cc6
-# ╠═f8b80935-e3fc-4224-82a9-adf88c3bcc97
-# ╟─5da0ef7d-ab07-403b-b9b3-7928202eebdb
-# ╟─dede2946-ee8b-4a78-b9a6-e7e51eeeb41f
-# ╟─f7549e5f-60f1-4530-bec4-88b020f65a46
-# ╟─0b642ad0-8648-41bd-8d75-062a50a0e0e3
-# ╟─8e812230-5284-4a9a-b16a-c054a12407f5
-# ╟─ed4ebadd-adb7-4c97-a044-48fcc37064b8
+# ╟─f8b80935-e3fc-4224-82a9-adf88c3bcc97
 # ╟─ab548612-82a5-48fa-b81c-aae646666997
 # ╠═48463954-2d4b-46fa-81ad-3e3c52420702
 # ╟─85665111-9c21-457d-b4c2-d12521761522
 # ╠═4b600132-f50e-4aaf-9646-a2bc4d643634
 # ╠═7b9759f1-f696-4d50-822d-88df713fb575
+# ╠═dede2946-ee8b-4a78-b9a6-e7e51eeeb41f
+# ╠═0b642ad0-8648-41bd-8d75-062a50a0e0e3
+# ╠═ed4ebadd-adb7-4c97-a044-48fcc37064b8
