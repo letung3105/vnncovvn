@@ -229,7 +229,7 @@ begin
 			subplot1 = @df df_my_summary myareaplot(
 				:date,
 				[:cases_investigating :cases_quarantined :cases_imported];
-				label = ["điều tra dịch tễ" "cách ly/phong tỏa" "nhập cảnh"],
+				label = ["under investigation" "in quarantine" "from immigrants"],
 				plot_title="daily new cases",
 				yscale = check_use_log_scale ? :log10 : :identity,
 			);
