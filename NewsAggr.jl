@@ -350,7 +350,7 @@ else
 
 			@df df plot(
 				:date, cols([Symbol(loc) for loc in top8]),
-				plot_title = "Daily new cases",
+				plot_title = "Cummulative cases",
 				label_title = "Top 8",
 				xlabel = "Date",
 				ylabel = "Cases count",
@@ -653,8 +653,8 @@ end
 # ╟─fd11d312-8082-4faf-9551-dc597687f4ef
 # ╟─f14c4beb-9803-40c3-8142-fd80e1cc96a2
 # ╟─8ace2145-8521-45a9-83b1-ab8f6eadfaea
-# ╟─c7df24e3-37ff-45ea-950d-99f3c1c711ce
 # ╟─eef505a5-0a58-4137-99e6-7effb2daf830
+# ╟─c7df24e3-37ff-45ea-950d-99f3c1c711ce
 # ╟─70584069-db75-4f6b-aa0d-43de20a36ed8
 # ╟─87d376c4-074c-11ec-3a91-27b12d84faef
 # ╟─4df3b761-c69a-4b96-81dc-08177d044447
