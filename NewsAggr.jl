@@ -30,9 +30,9 @@ begin
 	Plots.default(
 		legend = :topleft,
 		minorgrid = true,
+		linecolor = :match,
 		color_palette = :seaborn_deep,
 		size = (700, 400),
-		formatter = :plain
 	)
 	
 	PALETTE_COLORS = palette(:seaborn_deep)
@@ -40,9 +40,6 @@ end;
 
 # ╔═╡ 52c5aa3b-31c9-41d6-b840-b766d8724932
 md"## Plots"
-
-# ╔═╡ ec4728d1-2bc4-4da7-8290-565aaaf092b2
-md"**$(@bind check_use_log_scale CheckBox()) Use logarithmic scale**"
 
 # ╔═╡ fc216607-af60-431a-bac5-53240596b6a9
 md"### By location"
@@ -92,7 +89,7 @@ LOCATIONS = sort!(names(DATAFRAMES_RAW[:vnexpress][:covid19_2021_by_location])[2
 # ╔═╡ fd11d312-8082-4faf-9551-dc597687f4ef
 @bind locs_to_plot_binding MultiCheckBox(LOCATIONS)
 
-# ╔═╡ b1cd1aa6-2dfe-4d02-983a-aa440d44550f
+# ╔═╡ f14c4beb-9803-40c3-8142-fd80e1cc96a2
 begin
 	locs_to_plot = []
 	if !isnothing(locs_to_plot_binding)
@@ -103,6 +100,47 @@ end;
 # ╔═╡ d9dabd88-5e88-4b94-816e-3545f598100b
 DATES = Date(2021, 4, 27):Dates.Day(1):Dates.today()
 
+# ╔═╡ 1ecf716e-a584-4013-852b-2f461f63fe66
+let checkbox_plot_log = @bind overview_plot_log_y CheckBox();
+	date_plot_begin = @bind overview_plot_date_begin DateField(DateTime(DATES[1]));
+	date_plot_end = @bind overview_plot_date_end DateField(DateTime(DATES[end]))
+	
+	md"Plot from $date_plot_begin to $date_plot_end. Log scale? $checkbox_plot_log"
+end
+
+# ╔═╡ 923f6fc4-02d0-41e0-92a8-27192c4c7137
+let date_plot_begin = 
+		@bind compositions_plot_date_begin DateField(DateTime(DATES[1]));
+	date_plot_end =
+		@bind compositions_plot_date_end DateField(DateTime(DATES[end]))
+	
+	md"Plot from $date_plot_begin to $date_plot_end"
+end
+
+# ╔═╡ 8d1e5acb-996e-4edf-abd8-97eced94b3d0
+let checkbox_plot_log = @bind status_plot_log_y CheckBox();
+	date_plot_begin = @bind status_plot_date_begin DateField(DateTime(DATES[1]));
+	date_plot_end = @bind status_plot_date_end DateField(DateTime(DATES[end]))
+	
+	md"Plot from $date_plot_begin to $date_plot_end. Log scale? $checkbox_plot_log"
+end
+
+# ╔═╡ 1acb67e9-1a36-447d-a5a7-f5aba52d53d7
+let checkbox_plot_log = @bind top8_locs_plot_log_y CheckBox();
+	date_plot_begin = @bind top8_locs_plot_date_begin DateField(DateTime(DATES[1]));
+	date_plot_end = @bind top8_locs_plot_date_end DateField(DateTime(DATES[end]))
+	
+	md"Plot from $date_plot_begin to $date_plot_end. Log scale? $checkbox_plot_log"
+end
+
+# ╔═╡ 8ace2145-8521-45a9-83b1-ab8f6eadfaea
+let checkbox_plot_log = @bind compare_locs_plot_log_y CheckBox();
+	date_plot_begin = @bind compare_locs_plot_date_begin DateField(DateTime(DATES[1]));
+	date_plot_end = @bind compare_locs_plot_date_end DateField(DateTime(DATES[end]))
+	
+	md"Plot from $date_plot_begin to $date_plot_end. Log scale? $checkbox_plot_log"
+end
+
 # ╔═╡ bcc7b16f-9714-45e9-92bd-70dbea4b4cc6
 md"### Cleaned dataframes"
 
@@ -112,202 +150,277 @@ DATAFRAMES = Dict(
 );
 
 # ╔═╡ 9f7c09d8-fc02-4894-9cb3-c17ea157c71b
-let df = transform(DATAFRAMES[:vnexpress][:covid19_2021_by_day],
-		# Calculate mortality
-		[:deaths_cummulative, :cases_cummulative]
+if (isnothing(overview_plot_date_begin) 
+		|| isnothing(overview_plot_date_end)
+		|| overview_plot_date_begin > overview_plot_date_end
+		|| overview_plot_date_begin ∉ DATES
+		|| overview_plot_date_end ∉ DATES)
+	md"**Bad dates input**"
+else
+	let df = transform(DATAFRAMES[:vnexpress][:covid19_2021_by_day],
+			[:deaths_cummulative, :cases_cummulative]
 			=> ((deaths, cases) -> deaths.//cases.*100)
-			=> :mortality,
-	)
-	
-	# Avoid having 0 values in dataframe when plot with logarithmic scale
-	if check_use_log_scale
-		df[!, [:cases_investigating,
-				:cases_quarantined,
-				:cases_imported]] .+= 1
-	end
+			=> :mortality);
+		dates_to_plot = overview_plot_date_begin:Dates.Day(1):overview_plot_date_end
+		# Shared plot attributes
+		xrotation = 45;
+		yscale = overview_plot_log_y ? :log10 : :identity;
+		layout = @layout([a{0.6h}; b c]);
 
-	let # Plot daily new cases
-		subplot_daily = @df df myareaplot(
-			:date,
-			[:cases_investigating :cases_quarantined :cases_imported];
-			label = ["new cases from unknown source" "new cases under quarantine" "new cases from immigrants"],
-			yscale = check_use_log_scale ? :log10 : :identity,
-		);
+		# Select dates to plot
+		filter!(x -> x.date in dates_to_plot, df)
 
-		subplot_mortality = @df df plot(
-			:date, :mortality,
-			color = PALETTE_COLORS[4],
-			label = "mortality rate (%)",
-			rotation = 45,
-		)
+		# Avoid having 0 values in dataframe when plot with logarithmic scale
+		if overview_plot_log_y
+			df[!, [:cases_investigating, :cases_quarantined, :cases_imported]] .+= 1
+		end
 
-		# Plot cummulative cases
-		subplot_cummulative = @df df plot(
-			:date, :cases_cummulative;
-			label = "cummulative cases",
-			color = PALETTE_COLORS[5],
-			linetype = :bar,
-			linecolor = :match,
-			rotation = 45,
-			yscale = check_use_log_scale ? :log10 : :identity,
-		)
+		let # Plot daily new cases
+			subplot_daily = @df df myareaplot(
+				:date,
+				[:cases_investigating :cases_quarantined :cases_imported];
+				label = ["new cases from unknown source" "new cases under quarantine" "new cases from immigrants"],
+				yscale = yscale);
 
-		plot(subplot_daily, subplot_mortality, subplot_cummulative,
-			plot_title = "Overview (since $(DATES[1]))",
-			layout = @layout([a{0.6h}; b c]),
-			size = (700, 700)
-		)
+			subplot_mortality = @df df plot(
+				:date, :mortality,
+				label = "mortality rate (%)",
+				color = PALETTE_COLORS[4],
+				xrotation = xrotation)
+
+			# Plot cummulative cases
+			subplot_cummulative = @df df plot(
+				:date, :cases_cummulative;
+				label = "cummulative cases",
+				linetype = :bar,
+				color = PALETTE_COLORS[5],
+				xrotation = xrotation,
+				yscale = yscale)
+
+			plot(subplot_daily, subplot_mortality, subplot_cummulative,
+				plot_title = "Overview",
+				layout = layout,
+				size = (700, 700)
+			)
+		end
 	end
 end
 
 # ╔═╡ bc1d8e14-0be1-4b87-a129-7b39251d60c5
-let df = transform(DATAFRAMES[:vnexpress][:covid19_2021_by_day],
-		# Normalized cummulative active cases over cummulative cases
-		[:cases_cummulative, :deaths_cummulative, :recovered_cummulative]
+if (isnothing(compositions_plot_date_begin) 
+		|| isnothing(compositions_plot_date_end)
+		|| compositions_plot_date_begin > compositions_plot_date_end
+		|| compositions_plot_date_begin ∉ DATES
+		|| compositions_plot_date_end ∉ DATES)
+	md"**Bad dates input**"
+else
+	let df = transform(DATAFRAMES[:vnexpress][:covid19_2021_by_day],
+			# Normalized cummulative active cases over cummulative cases
+			[:cases_cummulative, :deaths_cummulative, :recovered_cummulative]
 			=> ((x, y, z) -> 1 .- y.//x .- z.//x)
 			=> :cases_cummulative_active_weight,
-		# Normalized cummulative deaths over cummulative cases
-		[:cases_cummulative, :deaths_cummulative]
+			# Normalized cummulative deaths over cummulative cases
+			[:cases_cummulative, :deaths_cummulative]
 			=> ((x, y) -> y .// x)
 			=> :deaths_cummulative_weight,
-		# Normalized cummulative recovered cases over cummulative cases
-		[:cases_cummulative, :recovered_cummulative]
+			# Normalized cummulative recovered cases over cummulative cases
+			[:cases_cummulative, :recovered_cummulative]
 			=> ((x, y) -> y .// x)
 			=> :recovered_cummulative_weight,
-		# Calculate percentage of cases that are on ICU
-		[:cases_cummulative_on_icu, :cases_cummulative]
+			# Calculate percentage of cases that are on ICU
+			[:cases_cummulative_on_icu, :cases_cummulative]
 			=> ((x, y) -> x .// y .* 100)
 			=> :cases_cummulative_on_icu_percent,
-		# Calculate percentage of cases that are on ECMO
-		[:cases_cummulative_on_ecmo, :cases_cummulative]
+			# Calculate percentage of cases that are on ECMO
+			[:cases_cummulative_on_ecmo, :cases_cummulative]
 			=> ((x, y) -> x .// y .* 100)
 			=> :cases_cummulative_on_ecmo_percent,
-	);
-	
-	let # Plot area chart for active cases, deaths and recovered
-		subplot_composition = @df df areaplot(
+		);
+		dates_to_plot = compositions_plot_date_begin:Dates.Day(1):compositions_plot_date_end;
+		xrotation = 45;
+		layout = @layout([a b])
+
+		filter!(x -> x.date in dates_to_plot, df)
+
+		let # Plot area chart for active cases, deaths and recovered
+			subplot_composition = @df df areaplot(
 				:date,
 				cols([:cases_cummulative_active_weight,
-					:recovered_cummulative_weight,
-					:deaths_cummulative_weight]);
+						:recovered_cummulative_weight,
+						:deaths_cummulative_weight]);
 				label = ["active cases (%)" "recovered (%)" "deaths (%)"],
 				palette = PALETTE_COLORS[2:end],
 				legend = :outertop,
-				rotation = 45,
-			);
-		subplot_lifesupport = @df df areaplot(:date,
-			cols([:cases_cummulative_on_icu_percent,
-					:cases_cummulative_on_ecmo_percent
-				]),
-			label = ["on ICU (%)" "on ECMO (%)"],
-			palette = PALETTE_COLORS[8:end],
-			rotation = 45,
-			);
-		
-		plot(
-			subplot_composition, subplot_lifesupport,
-			plot_title = "Compositions (since $(DATES[1]))",
-			layout = @layout([a b])
-		)
+				xrotation = xrotation);
+
+			# Plot percentage of cases that have to use ECMO and ICU
+			subplot_lifesupport = @df df areaplot(:date,
+				cols([:cases_cummulative_on_icu_percent,
+						:cases_cummulative_on_ecmo_percent]),
+				label = ["on ICU (%)" "on ECMO (%)"],
+				palette = PALETTE_COLORS[8:end],
+				xrotation = xrotation);
+
+			plot(
+				subplot_composition, subplot_lifesupport,
+				plot_title = "Compositions",
+				layout = layout)
+		end
 	end
 end
 
 # ╔═╡ a606da0f-2f60-4b12-a56a-8ef9261c8cc6
-let considered_date = Dates.today();
-	# Copy the original dataframe
-	df = filter(x -> x.date <= considered_date,
-		DATAFRAMES[:vnexpress][:covid19_2021_by_location]);
-	# Sort and get the top 8 locations with highest cummulative cases
-	top8 = sort(filter(
-			cols -> cols.date == considered_date,
-			stack(df, (2:size(df, 2)))
-			), 
-		order(:value, rev=true)
-	)[1:8, :variable]
-	
-	if sum(last(df)[2:end]) != 0
-		# Filter out locations that are not in the top 8
-		select!(df, :date, top8)
+if (isnothing(top8_locs_plot_date_begin)
+		|| isnothing(top8_locs_plot_date_end)
+		|| top8_locs_plot_date_begin > top8_locs_plot_date_end 
+		|| top8_locs_plot_date_begin ∉ DATES
+		|| top8_locs_plot_date_end ∉ DATES)
+	md"**Bad dates input**"
+else
+	let # Select dates to plot
+		dates_to_plot =
+			top8_locs_plot_date_begin:Dates.Day(1):top8_locs_plot_date_end;
+		df = filter(x -> x.date in dates_to_plot,
+			DATAFRAMES[:vnexpress][:covid19_2021_by_location]);
+		# Sort and get the top 8 locations with highest cummulative cases
+		top8 = sort(filter(
+				cols -> cols.date == top8_locs_plot_date_end,
+				stack(df, (2:size(df, 2)))
+				), 
+			order(:value, rev=true)
+		)[1:8, :variable];
+		yscale = top8_locs_plot_log_y ? :log10 : :identity
 
-		# Avoid having 0 values in dataframe when plot with logarithmic scale
-		if check_use_log_scale
-			df[!, top8] .+= 1
+		if sum(last(df)[2:end]) != 0
+			# Filter out locations that are not in the top 8
+			select!(df, :date, top8)
+
+			# Avoid having 0 values in dataframe when plot with logarithmic scale
+			if top8_locs_plot_log_y
+				df[!, top8] .+= 1
+			end
+
+			@df df plot(
+				:date, cols([Symbol(loc) for loc in top8]),
+				plot_title = "Daily new cases",
+				label_title = "Top 8",
+				xlabel = "Date",
+				ylabel = "Cases count",
+				legend = :outertopright,
+				yscale = yscale,
+			)
+		else
+			md"**Daily cases is not available for ranking**"
 		end
-
-		@df df plot(
-			:date, cols([Symbol(loc) for loc in top8]),
-			plot_title = "Daily new cases (since $(DATES[1]))",
-			label_title = "Top 8 of $considered_date",
-			xlabel = "Date",
-			ylabel = "Cases count",
-			yscale = check_use_log_scale ? :log10 : :identity,
-		)
-	else
-		md"**Daily cases on $considered_date is not available for ranking**"
 	end
 end
 
 # ╔═╡ 908d8a8a-eaa5-4648-ae3d-d2bcba501379
-let # Copy the original dataframe
-	df = copy(DATAFRAMES[:vnexpress][:covid19_2021_by_total]);
-	# Sort and get the top 8 locations with highest cummulative cases
-	top8 = sort(filter(
-			cols -> cols.date == Dates.today(),
-			stack(df, (2:size(df, 2)))
-			), 
-		order(:value, rev=true)
-	)[1:8, :variable]
-	
-	# Filter out locations that are not in the top 8
-	select!(df, :date, top8);		
-	
-	# Avoid having 0 values in dataframe when plot with logarithmic scale
-	if check_use_log_scale
-		df[!, top8] .+= 1
-	end
+if (isnothing(top8_locs_plot_date_begin)
+		|| isnothing(top8_locs_plot_date_end)
+		|| top8_locs_plot_date_begin > top8_locs_plot_date_end 
+		|| top8_locs_plot_date_begin ∉ DATES
+		|| top8_locs_plot_date_end ∉ DATES)
+	md"**Bad dates input**"
+else
+	let # Select dates to plot
+		dates_to_plot =
+			top8_locs_plot_date_begin:Dates.Day(1):top8_locs_plot_date_end;
+		df = filter(x -> x.date in dates_to_plot,
+			DATAFRAMES[:vnexpress][:covid19_2021_by_total]);
+		# Sort and get the top 8 locations with highest cummulative cases
+		top8 = sort(filter(
+				cols -> cols.date == top8_locs_plot_date_end,
+				stack(df, (2:size(df, 2)))
+				), 
+			order(:value, rev=true)
+		)[1:8, :variable];
+		yscale = top8_locs_plot_log_y ? :log10 : :identity
 
-	@df df plot(
-		:date, cols([Symbol(loc) for loc in top8]),
-		plot_title = "Cummulative cases (since $(DATES[1]))",
-		label_title = "Top 8",
-		xlabel = "Date",
-		ylabel = "Cases count",
-		yscale = check_use_log_scale ? :log10 : :identity,
-	)
+		if sum(last(df)[2:end]) == 0
+			md"**Cummulative cases is not available for ranking**"
+		else
+			# Filter out locations that are not in the top 8
+			select!(df, :date, top8)
+
+			# Avoid having 0 values in dataframe when plot with logarithmic scale
+			if top8_locs_plot_log_y
+				df[!, top8] .+= 1
+			end
+
+			@df df plot(
+				:date, cols([Symbol(loc) for loc in top8]),
+				plot_title = "Daily new cases",
+				label_title = "Top 8",
+				xlabel = "Date",
+				ylabel = "Cases count",
+				legend = :outertopright,
+				yscale = yscale,
+			)
+		end
+	end
 end
 
 # ╔═╡ c7df24e3-37ff-45ea-950d-99f3c1c711ce
-if !isempty(locs_to_plot)
-	let df = copy(DATAFRAMES[:vnexpress][:covid19_2021_by_total])
+if isempty(locs_to_plot)
+	md"**Location(s) not selected**"
+elseif (isnothing(compare_locs_plot_date_begin)
+		|| isnothing(compare_locs_plot_date_end)
+		|| compare_locs_plot_date_begin > compare_locs_plot_date_end
+		|| compare_locs_plot_date_begin ∉ DATES
+		|| compare_locs_plot_date_end ∉ DATES)
+	md"**Bad dates input**"
+else
+	let # Select dates to plot
+		dates_to_plot =
+			compare_locs_plot_date_begin:Dates.Day(1):compare_locs_plot_date_end;
+		df = filter(x -> x.date in dates_to_plot,
+			DATAFRAMES[:vnexpress][:covid19_2021_by_total]);
+		yscale = compare_locs_plot_log_y ? :log10 : :identity
+		
 		# Avoid -Inf with log
-		if check_use_log_scale
+		if compare_locs_plot_log_y
 			df[!, locs_to_plot] .+= 1
 		end
 
 		@df df plot(
 			:date, cols(locs_to_plot);
-			plot_title = "Cummulative cases (since $(DATES[1]))",
+			plot_title = "Cummulative cases",
 			xlabel = "Date",
 			ylabel = "Cases count",
-			yscale = check_use_log_scale ? :log10 : :identity,
+			yscale = yscale,
 		)
 	end
 end
 
 # ╔═╡ eef505a5-0a58-4137-99e6-7effb2daf830
-if !isempty(locs_to_plot)
-	let df = copy(DATAFRAMES[:vnexpress][:covid19_2021_by_location])
+if isempty(locs_to_plot)
+	md"**Location(s) not selected**"
+elseif (isnothing(compare_locs_plot_date_begin)
+		|| isnothing(compare_locs_plot_date_end)
+		|| compare_locs_plot_date_begin > compare_locs_plot_date_end
+		|| compare_locs_plot_date_begin ∉ DATES
+		|| compare_locs_plot_date_end ∉ DATES)
+	md"**Bad dates input**"
+else
+	let # Select dates to plot
+		dates_to_plot =
+			compare_locs_plot_date_begin:Dates.Day(1):compare_locs_plot_date_end;
+		df = filter(x -> x.date in dates_to_plot,
+			DATAFRAMES[:vnexpress][:covid19_2021_by_location]);
+		yscale = compare_locs_plot_log_y ? :log10 : :identity
+		
 		# Avoid -Inf with log
-		if check_use_log_scale
+		if compare_locs_plot_log_y
 			df[!, locs_to_plot] .+= 1
 		end
 
 		@df df plot(
 			:date, cols(locs_to_plot);
-			plot_title = "Daily cases (since $(DATES[1]))",
+			plot_title = "Daily cases",
 			xlabel = "Date",
 			ylabel = "Cases count",
-			yscale = check_use_log_scale ? :log10 : :identity,
+			yscale = yscale,
 		)
 	end
 end
@@ -444,92 +557,102 @@ begin
 end
 
 # ╔═╡ bb6d4ca5-3eb6-4405-90f5-add2d5f1c4ea
-let df = copy(DATAFRAMES[:vnexpress][:covid19_2021_by_day])
-		
-	if check_use_log_scale
-		df[!, [:deaths,
-				:deaths_cummulative,
-				:recovered,
-				:recovered_cummulative,
-				:cases_cummulative_active]] .+= 1
-	end
-	
-	let	subplot_active_cumsum = @df df plot(
-			:date, :cases_cummulative_active,
-			label = "active cases",
-			rotation = 45,
-			linetype = :bar,
-			linecolor = :match,
-			color = PALETTE_COLORS[2],
-			yscale = check_use_log_scale ? :log10 : :identity
-			);
-		subplot_active_diff = @df df plot(
-			:date, :cases_active,
-			label = "active cases' diff.",
-			rotation = 45,
-			linecolor = :match,
-			color = PALETTE_COLORS[2]
-			);
-	
-		subplot_recovered_cumsum = @df df plot(
-			:date, :recovered_cummulative,
-			label = "total recovered",
-			rotation = 45,
-			linetype = :bar,
-			linecolor = :match,
-			color = PALETTE_COLORS[3],
-			yscale = check_use_log_scale ? :log10 : :identity
-			);
-		subplot_recovered_daily = @df df plot(
-			:date, :recovered,
-			label = "daily recovered",
-			rotation = 45,
-			linecolor = :match,
-			color = PALETTE_COLORS[3],
-			yscale = check_use_log_scale ? :log10 : :identity
-			);
+if (isnothing(status_plot_date_begin)
+		|| isnothing(status_plot_date_end)
+		|| status_plot_date_begin > status_plot_date_end
+		|| status_plot_date_begin ∉ DATES
+		|| status_plot_date_end ∉ DATES)
+	md"**Bad dates input**"
+else
+	let # Select dates to plot
+		dates_to_plot = status_plot_date_begin:Dates.Day(1):status_plot_date_end;
+		df = filter(x -> x.date in dates_to_plot,
+			DATAFRAMES[:vnexpress][:covid19_2021_by_day]);
+		# Shared plot attributes
+		yscale = status_plot_log_y ? :log10 : :identity;
+		plot_color_active = PALETTE_COLORS[2];
+		plot_color_recovered = PALETTE_COLORS[3];
+		plot_color_deaths = PALETTE_COLORS[4];
+		xrotation = 45
 
-		subplot_deaths_cumsum = @df df plot(
-			:date, :deaths_cummulative,
-			label = "total deaths",
-			rotation = 45,
-			linetype = :bar,
-			linecolor = :match,
-			color = PALETTE_COLORS[4],
-			yscale = check_use_log_scale ? :log10 : :identity,
-			);
-		subplot_deaths_daily = @df df plot(
-			:date, :deaths,
-			label = "daily deaths",
-			rotation = 45,
-			linecolor = :match,
-			color = PALETTE_COLORS[4],
-			yscale = check_use_log_scale ? :log10 : :identity,
+		if status_plot_log_y
+			df[!, [:deaths,
+					:deaths_cummulative,
+					:recovered,
+					:recovered_cummulative,
+					:cases_cummulative_active]] .+= 1
+		end
+
+		let	subplot_active_cumsum = @df df plot(
+				:date, :cases_cummulative_active,
+				label = "active cases",
+				linetype = :bar,
+				color = plot_color_active,
+				xrotation = xrotation,
+				yscale = yscale,
+				);
+			subplot_active_diff = @df df plot(
+				:date, :cases_active,
+				label = "active cases' diff.",
+				color = plot_color_active,
+				xrotation = xrotation);
+
+			subplot_recovered_cumsum = @df df plot(
+				:date, :recovered_cummulative,
+				label = "total recovered",
+				linetype = :bar,
+				color = plot_color_recovered,
+				xrotation = xrotation,
+				yscale = yscale);
+			subplot_recovered_daily = @df df plot(
+				:date, :recovered,
+				label = "daily recovered",				
+				color = plot_color_recovered,
+				rotation = 45,
+				yscale = yscale);
+
+			subplot_deaths_cumsum = @df df plot(
+				:date, :deaths_cummulative,
+				label = "total deaths",
+				xrotation = xrotation,
+				linetype = :bar,
+				color = plot_color_deaths,
+				yscale = yscale);
+			subplot_deaths_daily = @df df plot(
+				:date, :deaths,
+				label = "daily deaths",
+				color = plot_color_deaths,
+				xrotation = xrotation,
+				yscale = yscale);
+
+			plot(
+				subplot_active_diff, subplot_active_cumsum,
+				subplot_recovered_daily, subplot_recovered_cumsum,
+				subplot_deaths_daily, subplot_deaths_cumsum,
+				plot_title = "Cases' status",
+				size = (700, 900),
+				layout = @layout([a b; c d; e f])
 			)
-		
-		plot(
-			subplot_active_cumsum, subplot_active_diff,
-			subplot_recovered_cumsum, subplot_recovered_daily,
-			subplot_deaths_cumsum, subplot_deaths_daily,
-			plot_title = "Cases' status (since $(DATES[1]))",
-			size = (700, 900),
-			layout = @layout([a b; c d; e f])
-		)
+		end
 	end
 end
 
 # ╔═╡ Cell order:
 # ╟─52c5aa3b-31c9-41d6-b840-b766d8724932
-# ╟─ec4728d1-2bc4-4da7-8290-565aaaf092b2
+# ╟─1ecf716e-a584-4013-852b-2f461f63fe66
 # ╟─9f7c09d8-fc02-4894-9cb3-c17ea157c71b
-# ╠═bc1d8e14-0be1-4b87-a129-7b39251d60c5
-# ╠═bb6d4ca5-3eb6-4405-90f5-add2d5f1c4ea
+# ╟─923f6fc4-02d0-41e0-92a8-27192c4c7137
+# ╟─bc1d8e14-0be1-4b87-a129-7b39251d60c5
+# ╟─8d1e5acb-996e-4edf-abd8-97eced94b3d0
+# ╟─bb6d4ca5-3eb6-4405-90f5-add2d5f1c4ea
 # ╟─fc216607-af60-431a-bac5-53240596b6a9
-# ╠═a606da0f-2f60-4b12-a56a-8ef9261c8cc6
-# ╠═908d8a8a-eaa5-4648-ae3d-d2bcba501379
+# ╟─1acb67e9-1a36-447d-a5a7-f5aba52d53d7
+# ╟─a606da0f-2f60-4b12-a56a-8ef9261c8cc6
+# ╟─908d8a8a-eaa5-4648-ae3d-d2bcba501379
 # ╟─873db3d5-af35-4d03-b4ff-5a1f10ab4924
 # ╟─fd11d312-8082-4faf-9551-dc597687f4ef
-# ╟─b1cd1aa6-2dfe-4d02-983a-aa440d44550f
+# ╟─f14c4beb-9803-40c3-8142-fd80e1cc96a2
+# ╟─8ace2145-8521-45a9-83b1-ab8f6eadfaea
 # ╟─c7df24e3-37ff-45ea-950d-99f3c1c711ce
 # ╟─eef505a5-0a58-4137-99e6-7effb2daf830
 # ╟─70584069-db75-4f6b-aa0d-43de20a36ed8
