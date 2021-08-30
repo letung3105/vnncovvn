@@ -229,6 +229,50 @@ function clean_covid19_2021_by_day(df_raw::DataFrame)::DataFrame
 	df[!, cols_cumulative_locf] = Impute.locf(df[!, cols_cumulative_locf])
 	
 	@assert !hasmissing(df)
+	
+	# Adding new columns
+	transform!(df,
+		# Calculate mortality
+		[:deaths_cummulative, :cases_cummulative]
+		=> ((deaths, cases) -> deaths.//cases.*100)
+		=> :mortality,
+		
+		# Normalized daily cases under investigation 
+		[:cases, :cases_quarantined, :cases_imported]
+		=> ((x, y, z) -> 1 .- y.//x .- z.//x)
+		=> :cases_investigating_weight,
+		# Normalized daily cases under quarantine
+		[:cases, :cases_quarantined]
+		=> ((x, y) -> y .// x)
+		=> :cases_quarantined_weight,
+		# Normalized daily cases from immigrants
+		[:cases, :cases_imported]
+		=> ((x, y) -> y .// x)
+		=> :cases_imported_weight,
+		
+		# Normalized cummulative active cases over cummulative cases
+		[:cases_cummulative, :deaths_cummulative, :recovered_cummulative]
+		=> ((x, y, z) -> 1 .- y.//x .- z.//x)
+		=> :cases_cummulative_active_weight,
+		# Normalized cummulative deaths over cummulative cases
+		[:cases_cummulative, :deaths_cummulative]
+		=> ((x, y) -> y .// x)
+		=> :deaths_cummulative_weight,
+		# Normalized cummulative recovered cases over cummulative cases
+		[:cases_cummulative, :recovered_cummulative]
+		=> ((x, y) -> y .// x)
+		=> :recovered_cummulative_weight,
+		
+		# Calculate percentage of cases that are on ICU
+		[:cases_cummulative_on_icu, :cases_cummulative]
+		=> ((x, y) -> x .// y .* 100)
+		=> :cases_cummulative_on_icu_percent,
+		# Calculate percentage of cases that are on ECMO
+		[:cases_cummulative_on_ecmo, :cases_cummulative]
+		=> ((x, y) -> x .// y .* 100)
+		=> :cases_cummulative_on_ecmo_percent,
+	)
+	
 	df
 end
 
@@ -291,11 +335,9 @@ if (isnothing(overview_plot_date_begin)
 		|| overview_plot_date_end ∉ DATES)
 	md"**Bad dates input**"
 else
-	let df = transform(DATAFRAMES[:vnexpress][:covid19_2021_by_day],
-			[:deaths_cummulative, :cases_cummulative]
-			=> ((deaths, cases) -> deaths.//cases.*100)
-			=> :mortality);
-		dates_to_plot = overview_plot_date_begin:Dates.Day(1):overview_plot_date_end
+	let dates_to_plot = overview_plot_date_begin:Dates.Day(1):overview_plot_date_end;
+		df = filter(x -> x.date in dates_to_plot,
+			DATAFRAMES[:vnexpress][:covid19_2021_by_day]);
 		# Shared plot attributes
 		xrotation = 45;
 		yscale = overview_plot_log_y ? :log10 : :identity;
@@ -348,36 +390,24 @@ if (isnothing(compositions_plot_date_begin)
 		|| compositions_plot_date_end ∉ DATES)
 	md"**Bad dates input**"
 else
-	let df = transform(DATAFRAMES[:vnexpress][:covid19_2021_by_day],
-			# Normalized cummulative active cases over cummulative cases
-			[:cases_cummulative, :deaths_cummulative, :recovered_cummulative]
-			=> ((x, y, z) -> 1 .- y.//x .- z.//x)
-			=> :cases_cummulative_active_weight,
-			# Normalized cummulative deaths over cummulative cases
-			[:cases_cummulative, :deaths_cummulative]
-			=> ((x, y) -> y .// x)
-			=> :deaths_cummulative_weight,
-			# Normalized cummulative recovered cases over cummulative cases
-			[:cases_cummulative, :recovered_cummulative]
-			=> ((x, y) -> y .// x)
-			=> :recovered_cummulative_weight,
-			# Calculate percentage of cases that are on ICU
-			[:cases_cummulative_on_icu, :cases_cummulative]
-			=> ((x, y) -> x .// y .* 100)
-			=> :cases_cummulative_on_icu_percent,
-			# Calculate percentage of cases that are on ECMO
-			[:cases_cummulative_on_ecmo, :cases_cummulative]
-			=> ((x, y) -> x .// y .* 100)
-			=> :cases_cummulative_on_ecmo_percent,
-		);
-		dates_to_plot = compositions_plot_date_begin:Dates.Day(1):compositions_plot_date_end;
+	let dates_to_plot =
+			compositions_plot_date_begin:Dates.Day(1):compositions_plot_date_end;
+		df = filter(x -> x.date in dates_to_plot,
+			DATAFRAMES[:vnexpress][:covid19_2021_by_day]);
 		xrotation = 45;
-		layout = @layout([a b])
-
-		filter!(x -> x.date in dates_to_plot, df)
+		layout = @layout([a; b c])
 
 		let # Plot area chart for active cases, deaths and recovered
-			subplot_composition = @df df areaplot(
+			subplot_composition_daily = @df df areaplot(
+				:date,
+				cols([:cases_investigating_weight,
+						:cases_quarantined_weight,
+						:cases_imported_weight]);
+				label = label = ["new cases from unknown source (%)" "new cases under quarantine (%)" "new cases from immigrants (%)"],
+				legend = :outertop);
+			
+			# Plot area chart for active cases, deaths and recovered
+			subplot_composition_cumsum = @df df areaplot(
 				:date,
 				cols([:cases_cummulative_active_weight,
 						:recovered_cummulative_weight,
@@ -396,9 +426,12 @@ else
 				xrotation = xrotation);
 
 			plot(
-				subplot_composition, subplot_lifesupport,
+				subplot_composition_daily,
+				subplot_composition_cumsum,
+				subplot_lifesupport,
 				plot_title = "Compositions",
-				layout = layout)
+				layout = layout,
+				size = (700, 900))
 		end
 	end
 end
