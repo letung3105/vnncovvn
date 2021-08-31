@@ -19,10 +19,10 @@ begin
 	Pkg.activate(pwd())
 	Pkg.add([
 			"PlutoUI", "HTTP", "CSV", "DataFrames", 
-			"Impute", "Plots", "StatsPlots"
+			"Impute", "Plots", "StatsPlots", "CategoricalArrays",
 			])
 	
-	using Dates, PlutoUI, DataFrames, Impute, Plots, StatsPlots
+	using Dates, PlutoUI, DataFrames, Impute, Plots, StatsPlots, CategoricalArrays
 	import LinearAlgebra, HTTP, CSV
 	
 	gr()
@@ -41,11 +41,17 @@ end;
 # ╔═╡ 52c5aa3b-31c9-41d6-b840-b766d8724932
 md"## Plots"
 
+# ╔═╡ 57eb35c4-c1e4-44d9-9d67-e085361bbfb4
+md"### Cases progression"
+
 # ╔═╡ fc216607-af60-431a-bac5-53240596b6a9
-md"### By location"
+md"#### By location"
 
 # ╔═╡ 873db3d5-af35-4d03-b4ff-5a1f10ab4924
-md"#### Select locations for comparison"
+md"##### Select locations for comparison"
+
+# ╔═╡ 5dcca0d1-aabe-4512-a322-5e9fa3ebdb28
+md"### Vaccination progression"
 
 # ╔═╡ 70584069-db75-4f6b-aa0d-43de20a36ed8
 md"## References"
@@ -56,13 +62,18 @@ SEEDS = Dict(
 		"https://vnexpress.net/microservice/sheet/type/covid19_2021_by_total",
 		"https://vnexpress.net/microservice/sheet/type/covid19_2021_by_location",
 		"https://vnexpress.net/microservice/sheet/type/covid19_2021_by_day",
-		"https://vnexpress.net/microservice/sheet/type/covid19_2021_by_map",
-		"https://vnexpress.net/microservice/sheet/type/covid19_2021_281",
-		# This one is JSON and it's not important parsing this
-		# "https://vnexpress.net/microservice/sheet/type/vaccine_covid_19",
 		"https://vnexpress.net/microservice/sheet/type/vaccine_data_vietnam",
 		"https://vnexpress.net/microservice/sheet/type/vaccine_data_vietnam_city",
 		"https://vnexpress.net/microservice/sheet/type/vaccine_to_vietnam",
+		
+		# Not using
+		"https://vnexpress.net/microservice/sheet/type/covid19_2021_by_map",
+		"https://vnexpress.net/microservice/sheet/type/covid19_2021_281",
+		
+		# This one is JSON and it's not important parsing this
+		"https://vnexpress.net/microservice/sheet/type/vaccine_covid_19",
+		
+		# Contains the same data as vaccine_data_vietnam_city
 		"https://vnexpress.net/microservice/sheet/type/vaccine_data_map",
 	]
 )
@@ -81,7 +92,7 @@ DATAFRAMES_RAW = Dict(asyncmap(collect(keys(SEEDS))) do srcname
 		dfname = Symbol(last(split(url, c -> c == '/')))
 		dfname => df
 		end)
-	end);
+	end)
 
 # ╔═╡ 06f0d4dc-25a2-4b3f-8558-d0b4935f7e99
 LOCATIONS = sort!(names(DATAFRAMES_RAW[:vnexpress][:covid19_2021_by_location])[2:63])
@@ -122,7 +133,7 @@ let checkbox_plot_log = @bind status_plot_log_y CheckBox();
 	date_plot_begin = @bind status_plot_date_begin DateField(DateTime(DATES[1]));
 	date_plot_end = @bind status_plot_date_end DateField(DateTime(DATES[end]))
 	
-	md"Plot from $date_plot_begin to $date_plot_end. Log scale? $checkbox_plot_log"
+	md"Plot from $date_plot_begin to $date_plot_end. $checkbox_plot_log Log scale (not apply for active cases differences)."
 end
 
 # ╔═╡ 1acb67e9-1a36-447d-a5a7-f5aba52d53d7
@@ -141,6 +152,15 @@ let checkbox_plot_log = @bind compare_locs_plot_log_y CheckBox();
 	md"Plot from $date_plot_begin to $date_plot_end. Log scale? $checkbox_plot_log"
 end
 
+# ╔═╡ 6f441a7a-97b8-4db3-84fa-34dc8971b8f8
+VACCINE_TYPES = let df = select(
+		DATAFRAMES_RAW[:vnexpress][:vaccine_to_vietnam],
+		"Loại Vaccine");
+	
+	filter!(x -> !ismissing(x["Loại Vaccine"]), df)
+	df[:, "Loại Vaccine"]
+end
+
 # ╔═╡ bcc7b16f-9714-45e9-92bd-70dbea4b4cc6
 md"### Cleaned dataframes"
 
@@ -156,8 +176,11 @@ hasmissing(df::DataFrame) =
 
 # ╔═╡ 7b9759f1-f696-4d50-822d-88df713fb575
 begin
+	# Copy of AreaPlot
 	@userplot MyAreaPlot
 
+	# This is modified to work with log scaling on yaxis,
+	# :fillrange runs down to 1 instead of 0
 	@recipe function f(a::MyAreaPlot)
 		data = cumsum(a.args[end], dims = 2)
 		x = length(a.args) == 1 ? (axes(data, 1)) : a.args[1]
@@ -239,15 +262,15 @@ function clean_covid19_2021_by_day(df_raw::DataFrame)::DataFrame
 		
 		# Normalized daily cases under investigation 
 		[:cases, :cases_quarantined, :cases_imported]
-		=> ((x, y, z) -> 1 .- y.//x .- z.//x)
+		=> ((x, y, z) -> 1 .- y.//(x .+ 1) .- z.//(x .+ 1))
 		=> :cases_investigating_weight,
 		# Normalized daily cases under quarantine
 		[:cases, :cases_quarantined]
-		=> ((x, y) -> y .// x)
+		=> ((x, y) -> y .// (x .+ 1))
 		=> :cases_quarantined_weight,
 		# Normalized daily cases from immigrants
 		[:cases, :cases_imported]
-		=> ((x, y) -> y .// x)
+		=> ((x, y) -> y .// (x .+ 1))
 		=> :cases_imported_weight,
 		
 		# Normalized cummulative active cases over cummulative cases
@@ -315,16 +338,115 @@ function clean_covid19_2021_by_location(df_raw::DataFrame)::DataFrame
 	df
 end
 
+# ╔═╡ 1f807f44-8481-4ec1-86ae-e0cdbdfc03be
+function clean_vaccine_to_vietnam(df_raw::DataFrame)::DataFrame
+	df = select(df_raw,
+		"Ngày" => :date,
+		"Số liều đã về" => :total,
+		Cols(VACCINE_TYPES))
+	
+	# remove spacing from name for easy access
+	rename!(df, "Sputnik V" => :SputnikV)
+	
+	# first row contains null date
+	delete!(df, 1)
+	
+	# parse string as date type
+	df[!, :date] = Date.(df[!, :date] .* "/2021", dateformat"d/m/Y")
+	
+	# replace missing with "0"
+	df = coalesce.(df, "0")
+	
+	# parse every column accep "date" and "Sputnik V" as Int
+	let selector = Not([:date, :SputnikV])
+		df[!, selector] = parse.(Int, filter.(isdigit, df[!, selector]))
+	end
+	
+	# fill date for "Sputnik V" by subtracting total with sum of others
+	# we do this because "Sputnik V" column contains incorrect data
+	let selector = Not([:date, :total, :SputnikV])
+		df[!, :SputnikV] = df[!, :total] - sum.(eachrow(df[!, selector]))
+	end
+	
+	@assert !hasmissing(df)
+	df
+end
+
+# ╔═╡ c484ef80-eb8d-44be-929c-9e0085ce2f79
+function clean_vaccine_to_vietnam_expect(df_raw::DataFrame)::DataFrame
+	df = select(df_raw, "Loại Vaccine" => :name, "Số liều theo loại" => :doses)
+	# remove row with missing name
+	filter!(x -> !ismissing(x.name), df)
+	# replace all missing with "0"
+	df = coalesce.(df, "0")
+	# parse string as number
+	transform!(
+		df,
+		:doses => (x -> parse.(Int, filter.(isdigit, x)));
+		renamecols=false)
+	
+	@assert !hasmissing(df)
+	df
+end
+
+# ╔═╡ 23f785a7-e6d4-45d8-bc2e-584a915756cb
+function clean_vaccine_data_vietnam(df_raw::DataFrame)::DataFrame
+	df = select(df_raw,
+		"Ngày" => :date,
+		"Tổng số mũi đã tiêm" => :doses_given,
+				
+		"Tổng số người đã tiêm" => :vaxed_cumsum,
+		"Tổng số người đã tiêm theo ngày" => :vaxed,
+		
+		"Số người tiêm đủ mũi" => :vaxed_fully_cumsum,
+		"Số người tiêm đủ mũi theo ngày" => :vaxed_fully,
+		
+		"Số người tiêm chưa đủ mũi" => :vaxed_partly_cumsum,
+		"Số người tiêm chưa đủ mũi theo ngày" => :vaxed_partly)
+	
+	# parse string as date type
+	df[!, :date] = Date.(df[!, :date] .* "/2021", dateformat"d/m/Y")
+	filter!(x -> x.date in DATES, df)
+	
+	# set missing daily number to 0
+	let selector = [:doses_given, :vaxed, :vaxed_fully, :vaxed_partly]
+		df[!, selector] = coalesce.(df[!, selector], 0)
+	end
+	
+	# replace missing with last-observered-carried-forward stategy
+	let selector = [:vaxed_cumsum, :vaxed_fully_cumsum, :vaxed_partly_cumsum]
+		Impute.locf!(df[!, selector])
+	end
+	
+	@assert !hasmissing(df)
+	df
+end
+
 # ╔═╡ f8b80935-e3fc-4224-82a9-adf88c3bcc97
 DATAFRAMES = Dict(
-	:vnexpress => Dict(
-		:covid19_2021_by_day => clean_covid19_2021_by_day(
-			DATAFRAMES_RAW[:vnexpress][:covid19_2021_by_day]),
-		:covid19_2021_by_location => clean_covid19_2021_by_location(
-			DATAFRAMES_RAW[:vnexpress][:covid19_2021_by_location]),
-		:covid19_2021_by_total => clean_covid19_2021_by_total(
-			DATAFRAMES_RAW[:vnexpress][:covid19_2021_by_total]),
-	)
+	:vnexpress_covid19_2021_by_day
+	=> clean_covid19_2021_by_day(
+		DATAFRAMES_RAW[:vnexpress][:covid19_2021_by_day]),
+		
+	:vnexpress_covid19_2021_by_location
+	=> clean_covid19_2021_by_location(
+		DATAFRAMES_RAW[:vnexpress][:covid19_2021_by_location]),
+		
+	:vnexpress_covid19_2021_by_location_cumsum
+	=> clean_covid19_2021_by_total(
+		DATAFRAMES_RAW[:vnexpress][:covid19_2021_by_total]),
+
+	:vnexpress_vaccine_to_vietnam
+	=> clean_vaccine_to_vietnam(
+		DATAFRAMES_RAW[:vnexpress][:vaccine_to_vietnam]),
+
+	:vnexpress_vaccine_to_vietnam_expect
+	=> clean_vaccine_to_vietnam_expect(
+		DATAFRAMES_RAW[:vnexpress][:vaccine_to_vietnam]),
+	
+	:vnexpress_vaccine_vietnam_progress
+	=> clean_vaccine_data_vietnam(
+		DATAFRAMES_RAW[:vnexpress][:vaccine_data_vietnam]),
 )
 
 # ╔═╡ 9f7c09d8-fc02-4894-9cb3-c17ea157c71b
@@ -337,7 +459,7 @@ if (isnothing(overview_plot_date_begin)
 else
 	let dates_to_plot = overview_plot_date_begin:Dates.Day(1):overview_plot_date_end;
 		df = filter(x -> x.date in dates_to_plot,
-			DATAFRAMES[:vnexpress][:covid19_2021_by_day]);
+			DATAFRAMES[:vnexpress_covid19_2021_by_day]);
 		# Shared plot attributes
 		xrotation = 45;
 		yscale = overview_plot_log_y ? :log10 : :identity;
@@ -393,7 +515,7 @@ else
 	let dates_to_plot =
 			compositions_plot_date_begin:Dates.Day(1):compositions_plot_date_end;
 		df = filter(x -> x.date in dates_to_plot,
-			DATAFRAMES[:vnexpress][:covid19_2021_by_day]);
+			DATAFRAMES[:vnexpress_covid19_2021_by_day]);
 		xrotation = 45;
 		layout = @layout([a; b c])
 
@@ -447,7 +569,7 @@ else
 	let # Select dates to plot
 		dates_to_plot = status_plot_date_begin:Dates.Day(1):status_plot_date_end;
 		df = filter(x -> x.date in dates_to_plot,
-			DATAFRAMES[:vnexpress][:covid19_2021_by_day]);
+			DATAFRAMES[:vnexpress_covid19_2021_by_day]);
 		# Shared plot attributes
 		yscale = status_plot_log_y ? :log10 : :identity;
 		plot_color_active = PALETTE_COLORS[2];
@@ -529,8 +651,8 @@ else
 		dates_to_plot =
 			top8_locs_plot_date_begin:Dates.Day(1):top8_locs_plot_date_end;
 		df = filter(x -> x.date in dates_to_plot,
-			DATAFRAMES[:vnexpress][:covid19_2021_by_location]);
-		# Sort and get the top 8 locations with highest cummulative cases
+			DATAFRAMES[:vnexpress_covid19_2021_by_location]);
+		# Sort and get the top 8 locations with highest daily cases
 		top8 = sort(filter(
 				cols -> cols.date == top8_locs_plot_date_end,
 				stack(df, (2:size(df, 2)))
@@ -575,7 +697,7 @@ else
 		dates_to_plot =
 			top8_locs_plot_date_begin:Dates.Day(1):top8_locs_plot_date_end;
 		df = filter(x -> x.date in dates_to_plot,
-			DATAFRAMES[:vnexpress][:covid19_2021_by_total]);
+			DATAFRAMES[:vnexpress_covid19_2021_by_location_cumsum]);
 		# Sort and get the top 8 locations with highest cummulative cases
 		top8 = sort(filter(
 				cols -> cols.date == top8_locs_plot_date_end,
@@ -623,7 +745,7 @@ else
 		dates_to_plot =
 			compare_locs_plot_date_begin:Dates.Day(1):compare_locs_plot_date_end;
 		df = filter(x -> x.date in dates_to_plot,
-			DATAFRAMES[:vnexpress][:covid19_2021_by_location]);
+			DATAFRAMES[:vnexpress_covid19_2021_by_location]);
 		yscale = compare_locs_plot_log_y ? :log10 : :identity
 		
 		# Avoid -Inf with log
@@ -655,7 +777,7 @@ else
 		dates_to_plot =
 			compare_locs_plot_date_begin:Dates.Day(1):compare_locs_plot_date_end;
 		df = filter(x -> x.date in dates_to_plot,
-			DATAFRAMES[:vnexpress][:covid19_2021_by_total]);
+			DATAFRAMES[:vnexpress_covid19_2021_by_location_cumsum]);
 		yscale = compare_locs_plot_log_y ? :log10 : :identity
 		
 		# Avoid -Inf with log
@@ -673,8 +795,38 @@ else
 	end
 end
 
+# ╔═╡ 0d05226a-08cd-4d9d-9e50-dbff53c98091
+let df = copy(DATAFRAMES[:vnexpress_vaccine_vietnam_progress])
+	@df df areaplot(:date, cols([:vaxed_partly, :vaxed_fully]))
+end
+
+# ╔═╡ 3d40e217-5258-42ab-a790-35aab832d5e1
+let df = copy(DATAFRAMES[:vnexpress_vaccine_vietnam_progress])
+	@df df areaplot(:date, cols([:vaxed_partly_cumsum, :vaxed_fully_cumsum]))
+end
+
+# ╔═╡ e3b61ff5-9c86-42e4-a2f5-478bf2aa0c0c
+let df = sort(
+		DATAFRAMES[:vnexpress_vaccine_to_vietnam_expect],
+		:doses, rev=true)
+	
+	names = CategoricalArray(df[!, :name])
+	levels!(names, df[!, :name])
+	
+	subplot_pie = @df df pie(:name, :doses; legend=:none)
+	subplot_bar = @df df bar(
+		:name, :doses;
+		legend = :none,
+		groups = names,
+		orientation = :h);
+	
+	plot(subplot_bar, subplot_pie, plot_title="Expected doses to receive",
+	group=names)
+end
+
 # ╔═╡ Cell order:
 # ╟─52c5aa3b-31c9-41d6-b840-b766d8724932
+# ╟─57eb35c4-c1e4-44d9-9d67-e085361bbfb4
 # ╟─1ecf716e-a584-4013-852b-2f461f63fe66
 # ╟─9f7c09d8-fc02-4894-9cb3-c17ea157c71b
 # ╟─923f6fc4-02d0-41e0-92a8-27192c4c7137
@@ -691,15 +843,20 @@ end
 # ╟─8ace2145-8521-45a9-83b1-ab8f6eadfaea
 # ╟─eef505a5-0a58-4137-99e6-7effb2daf830
 # ╟─c7df24e3-37ff-45ea-950d-99f3c1c711ce
+# ╟─5dcca0d1-aabe-4512-a322-5e9fa3ebdb28
+# ╟─0d05226a-08cd-4d9d-9e50-dbff53c98091
+# ╟─3d40e217-5258-42ab-a790-35aab832d5e1
+# ╟─e3b61ff5-9c86-42e4-a2f5-478bf2aa0c0c
 # ╟─70584069-db75-4f6b-aa0d-43de20a36ed8
 # ╟─87d376c4-074c-11ec-3a91-27b12d84faef
 # ╟─4df3b761-c69a-4b96-81dc-08177d044447
 # ╟─2f303728-e590-4b45-8e89-53b48f9ef242
 # ╠═88e4d0b5-7024-45e4-b867-6da55f726d17
-# ╟─06f0d4dc-25a2-4b3f-8558-d0b4935f7e99
+# ╠═06f0d4dc-25a2-4b3f-8558-d0b4935f7e99
 # ╟─d9dabd88-5e88-4b94-816e-3545f598100b
+# ╠═6f441a7a-97b8-4db3-84fa-34dc8971b8f8
 # ╟─bcc7b16f-9714-45e9-92bd-70dbea4b4cc6
-# ╟─f8b80935-e3fc-4224-82a9-adf88c3bcc97
+# ╠═f8b80935-e3fc-4224-82a9-adf88c3bcc97
 # ╟─ab548612-82a5-48fa-b81c-aae646666997
 # ╠═48463954-2d4b-46fa-81ad-3e3c52420702
 # ╟─85665111-9c21-457d-b4c2-d12521761522
@@ -708,3 +865,6 @@ end
 # ╠═dede2946-ee8b-4a78-b9a6-e7e51eeeb41f
 # ╠═0b642ad0-8648-41bd-8d75-062a50a0e0e3
 # ╠═ed4ebadd-adb7-4c97-a044-48fcc37064b8
+# ╠═1f807f44-8481-4ec1-86ae-e0cdbdfc03be
+# ╠═c484ef80-eb8d-44be-929c-9e0085ce2f79
+# ╠═23f785a7-e6d4-45d8-bc2e-584a915756cb
