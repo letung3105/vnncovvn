@@ -158,7 +158,18 @@ VACCINE_TYPES = let df = select(
 		"Loại Vaccine");
 	
 	filter!(x -> !ismissing(x["Loại Vaccine"]), df)
-	df[:, "Loại Vaccine"]
+	[filter(x -> !isspace(x), vax_type) for vax_type in df[:, "Loại Vaccine"]]
+end
+
+# ╔═╡ 687209a9-a2ef-46af-99a7-571abf5e90c8
+POPULATION_VN =
+let df = select(
+		DATAFRAMES_RAW[:vnexpress][:vaccine_data_vietnam_city],
+		"Tỉnh thành Crawl" => :location,
+		"Tổng số dân" => :population,
+		"Tổng số dân trên 18 tuổi" => :population_over_18,
+		"Số liều Vaccine dự kiến phân bổ" => :expected_doses)
+	coalesce.(df, 0)
 end
 
 # ╔═╡ bcc7b16f-9714-45e9-92bd-70dbea4b4cc6
@@ -340,13 +351,14 @@ end
 
 # ╔═╡ 1f807f44-8481-4ec1-86ae-e0cdbdfc03be
 function clean_vaccine_to_vietnam(df_raw::DataFrame)::DataFrame
-	df = select(df_raw,
+	df = copy(df_raw)
+	# remove spacing from name for easy access
+	rename!(df, "Sputnik V" => :SputnikV)
+	
+	df = select!(df,
 		"Ngày" => :date,
 		"Số liều đã về" => :total,
 		Cols(VACCINE_TYPES))
-	
-	# remove spacing from name for easy access
-	rename!(df, "Sputnik V" => :SputnikV)
 	
 	# first row contains null date
 	delete!(df, 1)
@@ -368,8 +380,18 @@ function clean_vaccine_to_vietnam(df_raw::DataFrame)::DataFrame
 		df[!, :SputnikV] = df[!, :total] - sum.(eachrow(df[!, selector]))
 	end
 	
+	# create data for missing dates
+	df_dates = DataFrame(date=DATES)
+	df_series = coalesce.(sort(outerjoin(df_dates, df, on = :date), :date), 0)
+	
+	# create cummulative sum of doses received 
+	let cols = names(df_series, Not(:date))
+		transform!(df_series, cols .=> cumsum)
+	end
+	filter!(x -> x.date in DATES, df_series)
+	
 	@assert !hasmissing(df)
-	df
+	df_series
 end
 
 # ╔═╡ c484ef80-eb8d-44be-929c-9e0085ce2f79
@@ -417,6 +439,17 @@ function clean_vaccine_data_vietnam(df_raw::DataFrame)::DataFrame
 	let selector = [:vaxed_cumsum, :vaxed_fully_cumsum, :vaxed_partly_cumsum]
 		Impute.locf!(df[!, selector])
 	end
+	
+	# number of vaccinated weighted over population total
+	total_pop_vn = sum(POPULATION_VN[!, :population])
+	transform!(df,
+		:vaxed_partly_cumsum
+		=> (x -> x .// total_pop_vn)
+		=> :vaxed_partly_cumsum_weight,
+			
+		:vaxed_fully_cumsum
+		=> (x -> x .// total_pop_vn)
+		=> :vaxed_fully_cumsum_weight)
 	
 	@assert !hasmissing(df)
 	df
@@ -534,7 +567,7 @@ else
 				cols([:cases_cummulative_active_weight,
 						:recovered_cummulative_weight,
 						:deaths_cummulative_weight]);
-				label = ["active cases (%)" "recovered (%)" "deaths (%)"],
+				label = ["active cases" "recovered" "deaths"],
 				palette = PALETTE_COLORS[2:end],
 				legend = :outertop,
 				xrotation = xrotation);
@@ -543,7 +576,7 @@ else
 			subplot_lifesupport = @df df areaplot(:date,
 				cols([:cases_cummulative_on_icu_percent,
 						:cases_cummulative_on_ecmo_percent]),
-				label = ["on ICU (%)" "on ECMO (%)"],
+				label = ["on ICU" "on ECMO"],
 				palette = PALETTE_COLORS[8:end],
 				xrotation = xrotation);
 
@@ -553,7 +586,7 @@ else
 				subplot_lifesupport,
 				plot_title = "Compositions",
 				layout = layout,
-				size = (700, 900))
+				size = (700, 700))
 		end
 	end
 end
@@ -720,7 +753,7 @@ else
 
 			@df df plot(
 				:date, cols([Symbol(loc) for loc in top8]),
-				plot_title = "Cummulative cases",
+				title = "Cummulative cases",
 				label_title = "Top 8",
 				xlabel = "Date",
 				ylabel = "Cases count",
@@ -755,7 +788,7 @@ else
 
 		@df df plot(
 			:date, cols(locs_to_plot);
-			plot_title = "Daily cases",
+			title = "Daily cases",
 			xlabel = "Date",
 			ylabel = "Cases count",
 			yscale = yscale,
@@ -787,7 +820,7 @@ else
 
 		@df df plot(
 			:date, cols(locs_to_plot);
-			plot_title = "Cummulative cases",
+			title = "Cummulative cases",
 			xlabel = "Date",
 			ylabel = "Cases count",
 			yscale = yscale,
@@ -795,14 +828,49 @@ else
 	end
 end
 
-# ╔═╡ 0d05226a-08cd-4d9d-9e50-dbff53c98091
+# ╔═╡ f07fa737-fac0-4ea5-99b8-83650a2b0c3b
 let df = copy(DATAFRAMES[:vnexpress_vaccine_vietnam_progress])
-	@df df areaplot(:date, cols([:vaxed_partly, :vaxed_fully]))
+
+	total_pop_vn = sum(POPULATION_VN[!, :population])
+	total_pop_vn_over18 = sum(POPULATION_VN[!, :population_over_18])
+	
+	subplot_vaccinated_percent = @df df areaplot(
+		:date, 
+		cols([:vaxed_partly_cumsum_weight, 
+				:vaxed_fully_cumsum_weight]),
+		title = "Overview",
+		label=["partly vaccinated" "fully vaccinated"],
+		ylims=(0, 1))
+	
+	hline!([total_pop_vn_over18 // total_pop_vn];
+		label="population over 18",
+		linewidth=2)
 end
 
-# ╔═╡ 3d40e217-5258-42ab-a790-35aab832d5e1
+# ╔═╡ 0d05226a-08cd-4d9d-9e50-dbff53c98091
 let df = copy(DATAFRAMES[:vnexpress_vaccine_vietnam_progress])
-	@df df areaplot(:date, cols([:vaxed_partly_cumsum, :vaxed_fully_cumsum]))
+
+	subplot_vaccinated_daily = @df df areaplot(
+		:date,
+		cols([:vaxed_partly, :vaxed_fully]),
+		title = "Daily vaccinations",
+		label=["partly vaccinated" "fully vaccinated"])
+end
+
+# ╔═╡ c427e141-adc4-49ce-b060-9c99d6cdbb89
+let df = copy(DATAFRAMES[:vnexpress_vaccine_to_vietnam])
+	doses_expect = sum(DATAFRAMES[:vnexpress_vaccine_to_vietnam_expect][!, :doses])
+	
+	subplot_doses_received = @df df areaplot(
+		:date,
+		cols([Symbol(x) for x in VACCINE_TYPES .* "_cumsum"]),
+		title = "Vaccine doses received",
+		legend = :outertopright,
+		label = permutedims(VACCINE_TYPES))
+	
+	hline!([doses_expect],
+		label="expected to receive",
+		linewidth=2)
 end
 
 # ╔═╡ e3b61ff5-9c86-42e4-a2f5-478bf2aa0c0c
@@ -812,7 +880,7 @@ let df = sort(
 	
 	names = CategoricalArray(df[!, :name])
 	levels!(names, df[!, :name])
-	
+
 	subplot_pie = @df df pie(:name, :doses; legend=:none)
 	subplot_bar = @df df bar(
 		:name, :doses;
@@ -820,8 +888,10 @@ let df = sort(
 		groups = names,
 		orientation = :h);
 	
-	plot(subplot_bar, subplot_pie, plot_title="Expected doses to receive",
-	group=names)
+	plot(subplot_bar,
+		subplot_pie,
+		plot_title = "Vaccine doses expected",
+		layout = @layout([a b]))
 end
 
 # ╔═╡ Cell order:
@@ -844,8 +914,9 @@ end
 # ╟─eef505a5-0a58-4137-99e6-7effb2daf830
 # ╟─c7df24e3-37ff-45ea-950d-99f3c1c711ce
 # ╟─5dcca0d1-aabe-4512-a322-5e9fa3ebdb28
+# ╟─f07fa737-fac0-4ea5-99b8-83650a2b0c3b
 # ╟─0d05226a-08cd-4d9d-9e50-dbff53c98091
-# ╟─3d40e217-5258-42ab-a790-35aab832d5e1
+# ╟─c427e141-adc4-49ce-b060-9c99d6cdbb89
 # ╟─e3b61ff5-9c86-42e4-a2f5-478bf2aa0c0c
 # ╟─70584069-db75-4f6b-aa0d-43de20a36ed8
 # ╟─87d376c4-074c-11ec-3a91-27b12d84faef
@@ -855,6 +926,7 @@ end
 # ╠═06f0d4dc-25a2-4b3f-8558-d0b4935f7e99
 # ╟─d9dabd88-5e88-4b94-816e-3545f598100b
 # ╠═6f441a7a-97b8-4db3-84fa-34dc8971b8f8
+# ╠═687209a9-a2ef-46af-99a7-571abf5e90c8
 # ╟─bcc7b16f-9714-45e9-92bd-70dbea4b4cc6
 # ╠═f8b80935-e3fc-4224-82a9-adf88c3bcc97
 # ╟─ab548612-82a5-48fa-b81c-aae646666997
